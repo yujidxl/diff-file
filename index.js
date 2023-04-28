@@ -1,6 +1,6 @@
 import Vue from 'vue';
-import Watcher from './watcher';
 import { arrayFind } from 'element-ui/src/utils/util';
+import Watcher from './watcher';
 
 Watcher.prototype.mutations = {
   setData(states, data) {
@@ -15,12 +15,10 @@ Watcher.prototype.mutations = {
     if (states.reserveSelection) {
       this.assertRowKey();
       this.updateSelectionByRowKey();
+    } else if (dataInstanceChanged) {
+      this.clearSelection();
     } else {
-      if (dataInstanceChanged) {
-        this.clearSelection();
-      } else {
-        this.cleanSelection();
-      }
+      this.cleanSelection();
     }
     this.updateAllSelected();
 
@@ -31,7 +29,10 @@ Watcher.prototype.mutations = {
     let array = states._columns;
     if (parent) {
       array = parent.children;
-      if (!array) array = parent.children = [];
+      if (!array) {
+        array = [];
+        parent.children = [];
+      }
     }
 
     if (typeof index !== 'undefined') {
@@ -49,13 +50,22 @@ Watcher.prototype.mutations = {
       this.updateColumns(); // hack for dynamics insert column
       this.scheduleLayout();
     }
+    console.log('打印后的处理后的信息', array);
+    // console.log(
+    //   states._columns.map((item) => item.label),
+    //   array.map((item) => item.label),
+    //   index
+    // );
   },
 
   removeColumn(states, column, parent) {
     let array = states._columns;
     if (parent) {
       array = parent.children;
-      if (!array) array = parent.children = [];
+      if (!array) {
+        array = [];
+        parent.children = [];
+      }
     }
     if (array) {
       array.splice(array.indexOf(column), 1);
@@ -70,7 +80,10 @@ Watcher.prototype.mutations = {
   sort(states, options) {
     const { prop, order, init } = options;
     if (prop) {
-      const column = arrayFind(states.columns, column => column.property === prop);
+      const column = arrayFind(
+        states.columns,
+        (column) => column.property === prop
+      );
       if (column) {
         column.order = order;
         this.updateSort(column, prop, order);
@@ -98,10 +111,11 @@ Watcher.prototype.mutations = {
     }
 
     this.updateTableScrollY();
+    this.syncFixedTableRowHeight();
   },
 
   filterChange(states, options) {
-    let { column, values, silent } = options;
+    const { column, values, silent } = options;
     const newFilters = this.updateFilters(column, values);
 
     this.execQuery();
@@ -111,6 +125,7 @@ Watcher.prototype.mutations = {
     }
 
     this.updateTableScrollY();
+    this.syncFixedTableRowHeight();
   },
 
   toggleAllSelection() {
@@ -131,7 +146,7 @@ Watcher.prototype.mutations = {
   }
 };
 
-Watcher.prototype.commit = function(name, ...args) {
+Watcher.prototype.commit = function (name, ...args) {
   const mutations = this.mutations;
   if (mutations[name]) {
     mutations[name].apply(this, [this.states].concat(args));
@@ -140,8 +155,12 @@ Watcher.prototype.commit = function(name, ...args) {
   }
 };
 
-Watcher.prototype.updateTableScrollY = function() {
+Watcher.prototype.updateTableScrollY = function () {
   Vue.nextTick(this.table.updateScrollY);
+};
+
+Watcher.prototype.syncFixedTableRowHeight = function () {
+  Vue.nextTick(() => this.table.layout.syncFixedTableRowHeight());
 };
 
 export default Watcher;

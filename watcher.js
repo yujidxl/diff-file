@@ -7,7 +7,7 @@ import {
   getColumnByKey,
   orderBy,
   toggleRowStatus
-} from '../../util';
+} from '../util';
 import expand from './expand';
 import current from './current';
 import tree from './tree';
@@ -30,7 +30,7 @@ const doFlattenColumns = (columns) => {
   const result = [];
   columns.forEach((column) => {
     if (column.children) {
-      result.push.apply(result, doFlattenColumns(column.children));
+      result.push(...doFlattenColumns(column.children));
     } else {
       result.push(column);
     }
@@ -132,6 +132,7 @@ export default Vue.extend({
         .concat(fixedLeafColumns)
         .concat(leafColumns)
         .concat(rightFixedLeafColumns);
+      // console.log('打印叶子结点信息', leafColumns);
       states.isComplex =
         states.fixedColumns.length > 0 || states.rightFixedColumns.length > 0;
     },
@@ -146,8 +147,10 @@ export default Vue.extend({
 
     // 选择
     isSelected(row) {
-      const { selection = [] } = this.states;
-      return selection.indexOf(row) > -1;
+      const { selection = [], rowKey } = this.states;
+      return rowKey
+        ? selection.findIndex((item) => item[rowKey] === row[rowKey]) > -1
+        : selection.indexOf(row) > -1;
     },
 
     clearSelection() {
@@ -169,7 +172,7 @@ export default Vue.extend({
         const selectedMap = getKeysMap(selection, rowKey);
         const dataMap = getKeysMap(data, rowKey);
         for (const key in selectedMap) {
-          if (selectedMap.hasOwnProperty(key) && !dataMap[key]) {
+          if ({}.hasOwnProperty.call(selectedMap, key) && !dataMap[key]) {
             deleted.push(selectedMap[key].row);
           }
         }
@@ -186,9 +189,11 @@ export default Vue.extend({
     },
 
     toggleRowSelection(row, selected, emitChange = true) {
-      const changed = toggleRowStatus(this.states.selection, row, selected);
+      const states = this.states;
+      const { selection, rowKey } = states;
+      const changed = toggleRowStatus(selection, row, selected, rowKey);
       if (changed) {
-        const newSelection = (this.states.selection || []).slice();
+        const newSelection = (selection || []).slice();
         // 调用 API 修改选中值，不触发 select 事件
         if (emitChange) {
           this.table.$emit('select', newSelection, row);
@@ -196,31 +201,58 @@ export default Vue.extend({
         this.table.$emit('selection-change', newSelection);
       }
     },
+    // 遍历树的selected
+    treeToggleFn(arr, states, selection, value, rowKey) {
+      if (!arr || !Array.isArray(arr) || !arr.length) return;
+      let flag = false;
+      arr.forEach((row, index) => {
+        if (states.selectable) {
+          if (
+            states.selectable.call(null, row, index) &&
+            toggleRowStatus(selection, row, value, rowKey)
+          ) {
+            flag = true;
+          }
+        } else if (toggleRowStatus(selection, row, value, rowKey)) {
+          flag = true;
+        }
+        if (
+          states.childrenColumnName &&
+          Array.isArray(row[states.childrenColumnName]) &&
+          row[states.childrenColumnName].length
+        ) {
+          const childRow = row[states.childrenColumnName];
+          const result = this.treeToggleFn(
+            childRow,
+            states,
+            selection,
+            value,
+            rowKey
+          );
+          flag = flag || result;
+        }
+      });
+      return flag;
+    },
 
     _toggleAllSelection() {
       const states = this.states;
-      const { data = [], selection } = states;
+      const { data = [], selection, rowKey } = states;
       // when only some rows are selected (but not all), select or deselect all of them
       // depending on the value of selectOnIndeterminate
       const value = states.selectOnIndeterminate
         ? !states.isAllSelected
         : !(states.isAllSelected || selection.length);
       states.isAllSelected = value;
-
+      // eslint-disable-next-line prefer-const
       let selectionChanged = false;
-      data.forEach((row, index) => {
-        if (states.selectable) {
-          if (
-            states.selectable.call(null, row, index) &&
-            toggleRowStatus(selection, row, value)
-          ) {
-            selectionChanged = true;
-          }
-        } else if (toggleRowStatus(selection, row, value)) {
-          selectionChanged = true;
-        }
-      });
-
+      selectionChanged = this.treeToggleFn(
+        data,
+        states,
+        selection,
+        value,
+        rowKey
+      );
       if (selectionChanged) {
         this.table.$emit(
           'selection-change',
@@ -245,7 +277,7 @@ export default Vue.extend({
 
     updateAllSelected() {
       const states = this.states;
-      const { selection, rowKey, selectable } = states;
+      const { selection, rowKey, selectable, childrenColumnName } = states;
       // data 为 null 时，解构时的默认值会被忽略
       const data = states.data || [];
       if (data.length === 0) {
@@ -265,19 +297,25 @@ export default Vue.extend({
       };
       let isAllSelected = true;
       let selectedCount = 0;
-      for (let i = 0, j = data.length; i < j; i++) {
-        const item = data[i];
-        const isRowSelectable = selectable && selectable.call(null, item, i);
-        if (!isSelected(item)) {
-          if (!selectable || isRowSelectable) {
-            isAllSelected = false;
-            break;
+      // 更新选中状态递归
+      const updateSelectDeep = function (arr) {
+        if (!arr || !Array.isArray(arr) || !arr.length) return;
+        for (let i = 0, j = arr.length; i < j; i++) {
+          const item = arr[i];
+          // eslint-disable-next-line no-useless-call
+          const isRowSelectable = selectable && selectable.call(null, item, i);
+          if (!isSelected(item)) {
+            if (!selectable || isRowSelectable) {
+              isAllSelected = false;
+              break;
+            }
+          } else {
+            selectedCount++;
           }
-        } else {
-          selectedCount++;
+          updateSelectDeep(arr[i][childrenColumnName]);
         }
-      }
-
+      };
+      updateSelectDeep(data);
       if (selectedCount === 0) isAllSelected = false;
       states.isAllSelected = isAllSelected;
     },

@@ -1,4 +1,4 @@
-import { toggleRowStatus, getKeysMap, getRowIdentity } from '../../util';
+import { toggleRowStatus, getKeysMap, getRowIdentity } from '../util';
 
 export default {
   data() {
